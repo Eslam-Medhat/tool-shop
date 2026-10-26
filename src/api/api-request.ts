@@ -7,7 +7,7 @@ export class ApiRequest {
     this.request = request;
   }
 
-  apiUrl = "https://api.practicesoftwaretesting.com";
+  apiUrl = process.env.API_URL || "https://api.practicesoftwaretesting.com";
 
   async login(username: string, password: string) {
     return await this.request.post(`${this.apiUrl}/users/login`, {

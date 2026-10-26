@@ -11,6 +11,7 @@ The project uses the **Page Object Model** for UI interactions and a small **API
 - [Getting started](#getting-started)
 - [Configuration](#configuration)
 - [Running the tests](#running-the-tests)
+- [Running against a local copy of the app](#running-against-a-local-copy-of-the-app)
 - [Continuous integration](#continuous-integration)
 - [Test suite](#test-suite)
 - [Architecture](#architecture)
@@ -34,6 +35,9 @@ Tests run on **Chromium** (Desktop Chrome) only. Locally the HTML reporter is us
 tool-shop/
 ├── .github/workflows/
 │   └── playwright.yml            # CI: runs the suite on GitHub Actions
+├── docker/
+│   ├── docker-compose.yml        # Local copy of the Toolshop app (UI :4200, API :8091)
+│   └── start-app.sh              # Starts it, seeds the database, waits until it is ready
 ├── playwright.config.ts          # Runner config (testDir, baseURL, test-id attribute, reporter)
 ├── tsconfig.json
 ├── package.json
@@ -83,6 +87,7 @@ USER_PASSWORD=<your account password>
 | `BASE_URL` | Playwright `baseURL`; UI tests call `page.goto("/...")` with relative paths |
 | `USER_EMAIL` | Login for both UI and API tests |
 | `USER_PASSWORD` | Login for both UI and API tests |
+| `API_URL` | Optional. API of the app `BASE_URL` points to; empty means the public API. Set it together with `BASE_URL` when using another copy of the app, otherwise the API calls still go to the public site |
 
 Other settings live in [playwright.config.ts](playwright.config.ts):
 
@@ -90,7 +95,7 @@ Other settings live in [playwright.config.ts](playwright.config.ts):
 - `fullyParallel: true`: tests run in parallel; on CI (`CI` env var set) there is 1 worker, 2 retries and `forbidOnly` is on.
 - `trace: "on-first-retry"`: traces are captured when a test is retried.
 
-The API base URL (`https://api.practicesoftwaretesting.com`) is currently hard-coded in `ApiRequest`.
+`API_URL` is the API base URL used by `ApiRequest`. When empty or unset it defaults to `https://api.practicesoftwaretesting.com`, so set it together with `BASE_URL` when you point the tests at another copy of the app (see [Running against a local copy of the app](#running-against-a-local-copy-of-the-app)).
 
 ## Running the tests
 
@@ -121,29 +126,48 @@ npx playwright show-report
 
 Test output goes to `test-results/` and `playwright-report/` (both git-ignored).
 
+## Running against a local copy of the app
+
+The public site sits behind a Cloudflare bot check that blocks GitHub's runners, so CI (and you, if you like) can run the tests against a local copy of the app instead. It needs Docker and free ports `4200` and `8091`.
+
+```bash
+./docker/start-app.sh      # starts the app, seeds the database, waits until it is ready
+
+BASE_URL=http://localhost:4200 \
+API_URL=http://localhost:8091 \
+USER_EMAIL=customer@practicesoftwaretesting.com \
+USER_PASSWORD=welcome01 \
+npx playwright test
+
+docker compose -f docker/docker-compose.yml down -v   # stop it and drop the data
+```
+
+`customer@practicesoftwaretesting.com` / `welcome01` is one of the public demo accounts seeded by the app (see its [docs](https://testsmith-io.github.io/practice-software-testing/)). Running `start-app.sh` again resets the database.
+
+How it works:
+
+- [docker/docker-compose.yml](docker/docker-compose.yml) runs the project's prebuilt sprint 5 API and UI images (pinned to version `2.5`) plus MariaDB.
+- The project's published `web` image is ARM-only, so it uses stock `nginx` with the project's `vhost.conf`. The script downloads that file at start-up (pinned to a commit) into `docker/nginx/`, which is git-ignored. It is not committed here because the project's license allows running its software but not publishing copies of it.
+- The images are pinned by digest in the compose file. To update them, pull the new tag and replace the digest with the output of `docker image inspect <image> --format '{{index .RepoDigests 0}}'`.
+- Start it with `start-app.sh`, not a bare `docker compose up`: compose refuses to start `web` until the nginx config has been downloaded.
+- The first start downloads about 450 MB of images; later starts take seconds.
+
 ## Continuous integration
 
-[.github/workflows/playwright.yml](.github/workflows/playwright.yml) runs the whole suite on GitHub Actions (Chromium, Node 24).
+[.github/workflows/playwright.yml](.github/workflows/playwright.yml) runs the whole suite on GitHub Actions (Chromium, Node 24) against a local copy of the app started by `docker/start-app.sh`.
 
 **When it runs:** on pushes and pull requests to `master` / `main`, and manually from the Actions tab (*Run workflow*).
 
-**Required secrets:** add these under *Settings → Secrets and variables → Actions → New repository secret*, otherwise the job stops at the *Check secrets* step:
-
-| Secret | Value |
-| --- | --- |
-| `USER_EMAIL` | Toolshop account email |
-| `USER_PASSWORD` | Toolshop account password |
-
-`BASE_URL` is set in the workflow itself.
+**No secrets needed:** the workflow uses the public demo account above, and every run starts with a freshly seeded database. That is also why pull requests from forks run normally, and why parallel runs cannot collide on shared data.
 
 **How it behaves:**
 
 - GitHub sets `CI=true`, so the config switches to 1 worker, 2 retries and `forbidOnly`.
-- Pull requests from forks and from Dependabot are **skipped**: GitHub doesn't give them repository secrets, and every test needs them to log in.
-- Each branch/PR has its own concurrency group. A new push to a PR cancels that PR's outdated run; pushes to `master` / `main` are never cancelled.
+- A new push to a pull request cancels that PR's outdated run. Pushes to `master` / `main` are never cancelled, so every merged commit is tested.
+- Steps have their own timeouts (12 min to start the app, 10 min for the tests), so a stuck app fails fast with its logs.
 - The token only has `contents: read`.
-
-**Results:** printed to the job log, with failures shown as annotations on the run and the PR. No HTML report, trace or `test-results` artifact is uploaded, on purpose: the repo is public, so anyone with a GitHub account can download artifacts, and the page snapshots and traces Playwright saves on failure can contain the typed password in plain text. To debug a CI failure, run the same test locally and open `npx playwright show-report`.
+- The HTML report (with traces for retried tests) is uploaded as the `playwright-report` artifact for 14 days. If a run fails, the last 100 lines of the app logs are printed.
+- **Do not upload the report if you switch CI to real credentials.** Reports and traces can contain typed values such as passwords, and artifacts of a public repo are downloadable by any GitHub user. It is only safe here because the demo account is public.
 
 ## Test suite
 
@@ -242,8 +266,9 @@ Authenticated calls send `Authorization: Bearer <access_token>`. Tokens expire a
 ## Known limitations
 
 - **Shared public site.** Tests run against the public demo, which other people also use. Data and product ordering can change, and the site can be slow or briefly unavailable.
-- **Parallel runs on one account can collide.** Two copies of the favorites test running at the same time (for example `--repeat-each` with several workers, or CI runs for two branches at once) both try to favorite the same product, and one gets `409`. A normal single run is fine; use `--workers=1` if you repeat it, and re-run the job if two CI runs overlapped.
+- **Parallel runs on one account can collide.** Two copies of the favorites test running at the same time (for example `--repeat-each` with several workers) both try to favorite the same product, and one gets `409`. A normal single run is fine; use `--workers=1` if you repeat it. CI is not affected, because every run has its own freshly seeded database.
 - **First product dependency.** Tests use the first product returned or shown, so they assume at least one product exists.
 - **No npm scripts** yet.
-- **Environment URLs are set in two places:** `BASE_URL` (in `.env` and the workflow) and the API URL hard-coded in `ApiRequest`. Change both together.
+- **Public site vs local copy:** against the public site (`.env` defaults) the tests share one account with other users and can hit the Cloudflare bot check from datacenter IPs. CI avoids both by using the local copy. Set `BASE_URL` and `API_URL` together when switching.
+- **Local copy needs Docker** and pulls third-party images from Docker Hub; the pinned version (`2.5`) may need bumping when the public site changes.
 - **Naming:** the checkout page object class is spelled `CheckoutPageage` (typo); renaming it needs updates in `checkout-page.ts` and `login-to-checkout.spec.ts`.
