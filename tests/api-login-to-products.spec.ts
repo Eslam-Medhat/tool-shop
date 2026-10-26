@@ -17,5 +17,4 @@ test("Signin then add product to cart and proceed to checkout", async ({
   // Get products using API
   const productsResponse = await apiRequest.getProducts(access_token);
   expect(productsResponse.ok()).toBeTruthy();
-  console.log(await productsResponse.json());
 });
