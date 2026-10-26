@@ -59,4 +59,10 @@ export class CheckoutPageage {
       .fill(paymentDetails.cardHolderName);
     await this.page.getByTestId("finish").click();
   }
+
+  async validateOrderConfirmation() {
+    await expect(
+      this.page.getByTestId("payment-success-message"),
+    ).toContainText("Payment was successful");
+  }
 }
