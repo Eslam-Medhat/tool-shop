@@ -1,0 +1,35 @@
+{
+    "compilerOptions": {
+        "paths": {
+            "@pages/*": [
+                "./src/pages/*"
+            ],
+            "@api/*": [
+                "./src/api/*"
+            ],
+        },
+        "types": [
+            "node",
+            "@playwright/test",
+        ],
+        "target": "ES2022",
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "strict": false,
+        "resolveJsonModule": true,
+        "esModuleInterop": true
+    },
+    "exclude": [
+        "**/node_modules/*",
+        "**/build /**",
+        "**/dist /**",
+        "playwright-report",
+        "test-results",
+        "coverage",
+        "docs/**"
+    ],
+    "include": [
+        "**/*.ts",
+        "**/*.js"
+    ]
+}
