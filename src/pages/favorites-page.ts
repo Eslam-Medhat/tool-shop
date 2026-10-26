@@ -9,7 +9,20 @@ export class FavoritesPage {
 
   async navigateToFavoritesPage() {
     await this.page.goto("/account/favorites");
-    await expect(this.page.getByTestId("page-title")).toHaveText("Favorites");
+    try {
+      // The public site can be slow, especially from CI, so allow more than the default 5s
+      await expect(this.page.getByTestId("page-title")).toHaveText(
+        "Favorites",
+        { timeout: 15_000 },
+      );
+    } catch (error) {
+      // CI keeps no traces or screenshots (public repo), so put what the page showed in the error
+      const text = (await this.page.locator("body").innerText()).slice(0, 500);
+      throw new Error(
+        `Favorites page did not load. URL: ${this.page.url()}\nPage text: ${text}`,
+        { cause: error },
+      );
+    }
   }
 
   async validateFavorite(favoriteId: string, productName: string) {

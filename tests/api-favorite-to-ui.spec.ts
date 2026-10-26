@@ -3,6 +3,22 @@ import { ApiRequest } from "../src/api/api-request";
 import { LoginPage } from "../src/pages/login-page";
 import { FavoritesPage } from "../src/pages/favorites-page";
 
+let accessToken: string | undefined;
+let favoriteId: string | undefined;
+
+test.afterEach(async ({ request }) => {
+  // Remove the data created by the test. A hook still runs (with working fixtures) when the test times out
+  if (accessToken && favoriteId) {
+    const deleteResponse = await new ApiRequest(request).deleteFavorite(
+      accessToken,
+      favoriteId,
+    );
+    expect(deleteResponse.status()).toBe(204);
+  }
+  accessToken = undefined;
+  favoriteId = undefined;
+});
+
 test("Add a favorite through the API then verify it in the UI", async ({
   page,
   request,
@@ -16,6 +32,7 @@ test("Add a favorite through the API then verify it in the UI", async ({
   );
   expect(loginResponse.ok()).toBeTruthy();
   const { access_token } = await loginResponse.json();
+  accessToken = access_token;
 
   // Pick a product using API
   const productsResponse = await apiRequest.getProducts(access_token);
@@ -35,22 +52,13 @@ test("Add a favorite through the API then verify it in the UI", async ({
   // Create the data using API
   const addResponse = await apiRequest.addFavorite(access_token, productId);
   expect(addResponse.status()).toBe(201);
-  const { id: favoriteId } = await addResponse.json();
+  favoriteId = (await addResponse.json()).id;
 
-  try {
-    // Verify the same data in the UI
-    const loginPage = new LoginPage(page);
-    const favoritesPage = new FavoritesPage(page);
-    await loginPage.navigateToLoginPage();
-    await loginPage.login(process.env.USER_EMAIL!, process.env.USER_PASSWORD!);
-    await favoritesPage.navigateToFavoritesPage();
-    await favoritesPage.validateFavorite(favoriteId, productName);
-  } finally {
-    // Remove the data created by the test
-    const deleteResponse = await apiRequest.deleteFavorite(
-      access_token,
-      favoriteId,
-    );
-    expect(deleteResponse.status()).toBe(204);
-  }
+  // Verify the same data in the UI
+  const loginPage = new LoginPage(page);
+  const favoritesPage = new FavoritesPage(page);
+  await loginPage.navigateToLoginPage();
+  await loginPage.login(process.env.USER_EMAIL!, process.env.USER_PASSWORD!);
+  await favoritesPage.navigateToFavoritesPage();
+  await favoritesPage.validateFavorite(favoriteId!, productName);
 });
