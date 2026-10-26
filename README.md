@@ -11,6 +11,7 @@ The project uses the **Page Object Model** for UI interactions and a small **API
 - [Getting started](#getting-started)
 - [Configuration](#configuration)
 - [Running the tests](#running-the-tests)
+- [Continuous integration](#continuous-integration)
 - [Test suite](#test-suite)
 - [Architecture](#architecture)
 - [Writing a new test](#writing-a-new-test)
@@ -25,15 +26,18 @@ The project uses the **Page Object Model** for UI interactions and a small **API
 | TypeScript | Language |
 | [dotenv](https://github.com/motdotla/dotenv) | Loads credentials and the base URL from `.env` |
 
-Tests run on **Chromium** (Desktop Chrome) only. The HTML reporter is enabled.
+Tests run on **Chromium** (Desktop Chrome) only. Locally the HTML reporter is used; CI writes results to the job log instead (see [Continuous integration](#continuous-integration)).
 
 ## Project structure
 
 ```
 tool-shop/
+├── .github/workflows/
+│   └── playwright.yml            # CI: runs the suite on GitHub Actions
 ├── playwright.config.ts          # Runner config (testDir, baseURL, test-id attribute, reporter)
 ├── tsconfig.json
 ├── package.json
+├── .env.example                  # Template for .env
 ├── .env                          # Local secrets/config (git-ignored, create it yourself)
 ├── src/
 │   ├── api/
@@ -66,7 +70,7 @@ npx playwright install chromium
 
 ## Configuration
 
-Create a `.env` file in the project root (it is git-ignored, never commit it):
+Copy `.env.example` to `.env` in the project root and fill in the values (`.env` is git-ignored, never commit it):
 
 ```dotenv
 BASE_URL=https://practicesoftwaretesting.com
@@ -116,6 +120,30 @@ npx playwright show-report
 ```
 
 Test output goes to `test-results/` and `playwright-report/` (both git-ignored).
+
+## Continuous integration
+
+[.github/workflows/playwright.yml](.github/workflows/playwright.yml) runs the whole suite on GitHub Actions (Chromium, Node 24).
+
+**When it runs:** on pushes and pull requests to `master` / `main`, and manually from the Actions tab (*Run workflow*).
+
+**Required secrets:** add these under *Settings → Secrets and variables → Actions → New repository secret*, otherwise the job stops at the *Check secrets* step:
+
+| Secret | Value |
+| --- | --- |
+| `USER_EMAIL` | Toolshop account email |
+| `USER_PASSWORD` | Toolshop account password |
+
+`BASE_URL` is set in the workflow itself.
+
+**How it behaves:**
+
+- GitHub sets `CI=true`, so the config switches to 1 worker, 2 retries and `forbidOnly`.
+- Pull requests from forks and from Dependabot are **skipped**: GitHub doesn't give them repository secrets, and every test needs them to log in.
+- Each branch/PR has its own concurrency group. A new push to a PR cancels that PR's outdated run; pushes to `master` / `main` are never cancelled.
+- The token only has `contents: read`.
+
+**Results:** printed to the job log, with failures shown as annotations on the run and the PR. No HTML report, trace or `test-results` artifact is uploaded, on purpose: the repo is public, so anyone with a GitHub account can download artifacts, and the page snapshots and traces Playwright saves on failure can contain the typed password in plain text. To debug a CI failure, run the same test locally and open `npx playwright show-report`.
 
 ## Test suite
 
@@ -214,7 +242,8 @@ Authenticated calls send `Authorization: Bearer <access_token>`. Tokens expire a
 ## Known limitations
 
 - **Shared public site.** Tests run against the public demo, which other people also use. Data and product ordering can change, and the site can be slow or briefly unavailable.
-- **Parallel runs on one account can collide.** Two copies of the favorites test running at the same time (for example `--repeat-each` with several workers) both try to favorite the same product, and one gets `409`. A normal single run is fine; use `--workers=1` if you repeat it.
+- **Parallel runs on one account can collide.** Two copies of the favorites test running at the same time (for example `--repeat-each` with several workers, or CI runs for two branches at once) both try to favorite the same product, and one gets `409`. A normal single run is fine; use `--workers=1` if you repeat it, and re-run the job if two CI runs overlapped.
 - **First product dependency.** Tests use the first product returned or shown, so they assume at least one product exists.
-- **No npm scripts, no CI workflow** yet.
+- **No npm scripts** yet.
+- **Environment URLs are set in two places:** `BASE_URL` (in `.env` and the workflow) and the API URL hard-coded in `ApiRequest`. Change both together.
 - **Naming:** the checkout page object class is spelled `CheckoutPageage` (typo); renaming it needs updates in `checkout-page.ts` and `login-to-checkout.spec.ts`.

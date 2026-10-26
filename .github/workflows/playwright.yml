@@ -1,0 +1,57 @@
+name: Playwright Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One group per branch/PR: a new push to a PR cancels its outdated run, pushes to master are never cancelled
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    # Fork and Dependabot PRs don't get repository secrets and every test needs them to log in,
+    # so skip those instead of failing
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_URL: https://practicesoftwaretesting.com
+      USER_EMAIL: ${{ secrets.USER_EMAIL }}
+      USER_PASSWORD: ${{ secrets.USER_PASSWORD }}
+    steps:
+      - name: Check secrets
+        run: |
+          if [ -z "$USER_EMAIL" ] || [ -z "$USER_PASSWORD" ]; then
+            echo "::error::Add the USER_EMAIL and USER_PASSWORD repository secrets (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      # Results go to the job log only, where GitHub masks secrets. Don't upload the HTML report
+      # or test-results: artifacts of a public repo are downloadable by any GitHub user, and the
+      # page snapshots and traces saved on failure can contain the typed password in plain text
+      - name: Run Playwright tests
+        run: npx playwright test --trace=off --reporter=github,list
